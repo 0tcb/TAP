@@ -44,61 +44,33 @@ var tap_enclave_metadata_cache_conflict : tap_enclave_metadata_cache_conflict_t;
 const kzero_regs_t : regs_t;
 axiom (forall ri : regindex_t :: kzero_regs_t[ri] == k0_word_t);
 
-procedure {:inline 1} initialize_tap()
+procedure initialize_tap();
   modifies cpu_enclave_id,
            cpu_addr_map,
            cpu_addr_valid,
            untrusted_addr_map,
            untrusted_addr_valid,
+           untrusted_pc,
+           untrusted_regs,
            cpu_pc,
            cpu_regs,
            cpu_owner_map,
+           cpu_mem,
            cache_valid_map,
            tap_enclave_metadata_valid;
-{
-  havoc untrusted_addr_map;
-  havoc untrusted_addr_valid;
+  ensures cpu_enclave_id == tap_null_enc_id;
+  ensures cpu_addr_map == untrusted_addr_map;
+  ensures cpu_addr_valid == untrusted_addr_valid;
+  ensures cpu_pc == untrusted_pc;
+  ensures cpu_regs == untrusted_regs;
+  ensures (forall p : wap_addr_t :: cpu_mem[p] == k0_word_t);
+  ensures (forall p : wap_addr_t :: cpu_owner_map[p] == tap_null_enc_id);
+  ensures (forall e : tap_enclave_id_t :: !tap_enclave_metadata_valid[e]);
+  ensures (tap_addr_perm_x(cpu_addr_valid[cpu_pc]));
+  ensures cpu_cache_enabled ==>
+            (forall i : cache_set_index_t, w : cache_way_index_t ::
+                (valid_cache_set_index(i) && valid_cache_way_index(w)) ==> !cache_valid_map[i, w]);
 
-  cpu_enclave_id := tap_null_enc_id;
-  cpu_addr_map := untrusted_addr_map;
-  cpu_addr_valid := untrusted_addr_valid;
-  cpu_pc := untrusted_pc;
-  cpu_regs := untrusted_regs;
-
-  // no enclaves exist.
-  havoc cpu_owner_map;
-  assume (forall pa : wap_addr_t :: cpu_owner_map[pa] == tap_null_enc_id);
-  havoc tap_enclave_metadata_valid;
-  assume (forall e : tap_enclave_id_t :: !tap_enclave_metadata_valid[e]);
-  // and that the PC is in sane state.
-  assume (tap_addr_perm_x(cpu_addr_valid[cpu_pc]));
-  assume (cpu_owner_map[cpu_addr_map[cpu_pc]] == cpu_enclave_id);
-
-  if (cpu_cache_enabled) {
-      call init_cache();
-  }
-}
-
-// -------------------------------------------------------------------- //
-// Functions to read/write memory.                                      //
-// -------------------------------------------------------------------- //
-/*
-procedure {:inline 1} load_pa(paddr : wap_addr_t)
-    returns (data: word_t, excp: exception_t)
-{
-    // default.
-    data := k0_word_t;
-
-    // are we not allowed to access this memory?
-    if (cpu_owner_map[paddr] != cpu_enclave_id) {
-        excp := excp_tp_protection_fault; return;
-    }
-
-    // all good so far. so read.
-    data := cpu_mem[paddr];
-    excp := excp_none;
-}
-*/
 
 procedure update_cache(pa : wap_addr_t);
   modifies cache_valid_map, cache_tag_map;
@@ -148,7 +120,7 @@ procedure {:inline 1} set_enclave_addr_map(
    modifies tap_enclave_metadata_addr_map;
 {
     // default values.
-    if (cpu_enclave_id == tap_null_enc_id   &&
+    if (cpu_enclave_id == tap_null_enc_id &&
         tap_enclave_metadata_valid[eid]) 
     {
         if (!tap_enclave_metadata_addr_excl[eid][va]) {
@@ -161,12 +133,14 @@ procedure {:inline 1} set_enclave_addr_map(
     status := enclave_op_invalid_arg;
 }
 
-procedure {:inline 1} fetch_va(vaddr : vaddr_t)
+procedure {:inline 1} fetch_va(vaddr : vaddr_t, repl_way : cache_way_index_t)
     returns (data: word_t, excp: exception_t, hit : bool)
+    requires valid_cache_way_index(repl_way);
     modifies cpu_addr_valid, cache_valid_map, cache_tag_map;
 {
     var paddr : wap_addr_t;
     var owner_eid : tap_enclave_id_t;
+    var hit_way : cache_way_index_t;
 
     // default.
     data := k0_word_t;
@@ -189,16 +163,18 @@ procedure {:inline 1} fetch_va(vaddr : vaddr_t)
     excp := excp_none;
     // update cache.
     if (cpu_cache_enabled) { 
-        call hit := query_cache(paddr); 
+        call hit, hit_way := query_cache(paddr, repl_way); 
     }
 }
 
-procedure {:inline 1} load_va(vaddr : vaddr_t)
+procedure {:inline 1} load_va(vaddr : vaddr_t, repl_way : cache_way_index_t)
     returns (data: word_t, excp: exception_t, hit : bool)
+    requires valid_cache_way_index(repl_way);
     modifies cache_valid_map, cache_tag_map, cpu_addr_valid;
 {
     var paddr : wap_addr_t;
     var owner_eid : tap_enclave_id_t;
+    var hit_way : cache_way_index_t;
 
     // default.
     data := k0_word_t;
@@ -221,33 +197,20 @@ procedure {:inline 1} load_va(vaddr : vaddr_t)
     excp := excp_none;
     // update cache.
     if (cpu_cache_enabled) { 
-        call hit := query_cache(paddr); 
+        call hit, hit_way := query_cache(paddr, repl_way); 
     }
 }
 
-/*
-procedure {:inline 1} store_pa(pa : wap_addr_t, data: word_t)
-    returns (excp: exception_t)
-    modifies cpu_mem;
-{
-    // are we not allowed to access this memory/
-    if (cpu_owner_map[pa] != cpu_enclave_id) {
-        excp := excp_tp_protection_fault; return;
-    }
-    // write.
-    cpu_mem[pa] := data;
-    excp := excp_none;
-}
-*/
-
-procedure {:inline 1} store_va(vaddr : vaddr_t, data : word_t)
+procedure {:inline 1} store_va(vaddr : vaddr_t, data : word_t, repl_way : cache_way_index_t)
     returns (excp: exception_t, hit : bool)
     modifies cpu_mem;
     modifies cache_valid_map, cache_tag_map, cpu_addr_valid;
+    requires valid_cache_way_index(repl_way);
     ensures (excp != excp_none ==> cpu_mem == old(cpu_mem));
 {
     var paddr : wap_addr_t;
     var owner_eid : tap_enclave_id_t;
+    var hit_way : cache_way_index_t;
 
     // default
     hit := false; 
@@ -269,9 +232,17 @@ procedure {:inline 1} store_va(vaddr : vaddr_t, data : word_t)
     excp := excp_none;
     // update cache.
     if (cpu_cache_enabled) { 
-        call hit := query_cache(paddr); 
+        call hit, hit_way := query_cache(paddr, repl_way); 
     }
 }
+
+procedure modify_owner_map(
+    /* enclave id   */  eid         : tap_enclave_id_t,
+    /* new map      */  excl_paddr  : excl_map_t
+)
+    returns (status : enclave_op_result_t);
+    modifies cpu_owner_map;
+    modifies cpu_mem;
 
 // -------------------------------------------------------------------- // 
 // Helper functions                                                     // 
@@ -310,10 +281,10 @@ procedure launch(
     // global TAP invariants.                                               //
     //----------------------------------------------------------------------//
     requires (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==>
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==>
                     (cpu_owner_map[pa] != e));
     ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==>
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==>
                     (cpu_owner_map[pa] != e));
 
     //----------------------------------------------------------------------//
@@ -375,7 +346,7 @@ procedure launch(
     //---------------------------------------------------------------------//
     ensures
         ((cpu_enclave_id == tap_null_enc_id)                                                        &&   
-         (eid != tap_null_enc_id)                                                                   &&   
+         (valid_enclave_id(eid))                                                                    &&   
          (!old(tap_enclave_metadata_valid)[eid])                                                    &&   
          (tap_addr_perm_x(addr_valid[entrypoint]))                                                  &&   
          (excl_paddr[addr_map[entrypoint]])                                                         &&   
@@ -393,7 +364,7 @@ procedure launch(
     //---------------------------------------------------------------------//
     ensures (status == enclave_op_success ==> (forall pa : wap_addr_t :: 
                 (if excl_paddr[pa] then cpu_owner_map[pa] == eid
-                                 else cpu_owner_map[pa] == old(cpu_owner_map)[pa])));
+                                   else cpu_owner_map[pa] == old(cpu_owner_map)[pa])));
     ensures (status == enclave_op_success) ==> (forall pa : wap_addr_t :: 
             if excl_paddr[pa] then cpu_owner_map[pa] == eid
                             else cpu_owner_map[pa] == old(cpu_owner_map)[pa]);
@@ -445,19 +416,19 @@ procedure enter(eid: tap_enclave_id_t)
     // global TAP invariants.                                               //
     //----------------------------------------------------------------------//
     requires (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
     ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
 
     //----------------------------------------------------------------------//
     // conditions for success or failure.                                   //
     //----------------------------------------------------------------------//
-    ensures ((eid != tap_null_enc_id)                  &&
+    ensures ((valid_enclave_id(eid))                   &&
              (tap_enclave_metadata_valid[eid])         &&
              (old(cpu_enclave_id) == tap_null_enc_id)) ==> (status == enclave_op_success);
-    ensures ((eid == tap_null_enc_id)                  ||
+    ensures ((!valid_enclave_id(eid))                  ||
              (!tap_enclave_metadata_valid[eid])        ||
              (old(cpu_enclave_id) != tap_null_enc_id)) ==> (status == enclave_op_invalid_arg);
     ensures (status == enclave_op_success || status == enclave_op_invalid_arg);
@@ -503,20 +474,20 @@ procedure resume(eid: tap_enclave_id_t)
     // global TAP invariants.                                               //
     //----------------------------------------------------------------------//
     requires (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
     ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
 
     //----------------------------------------------------------------------//
     // conditions for success or failure.                                   //
     //----------------------------------------------------------------------//
-    ensures ((eid != tap_null_enc_id)                     &&
+    ensures ((valid_enclave_id(eid))                      &&
              (tap_enclave_metadata_valid[eid])            && 
              (tap_enclave_metadata_paused[eid])           &&
              (old(cpu_enclave_id) == tap_null_enc_id))    ==> (status == enclave_op_success);
-    ensures ((eid == tap_null_enc_id)                     ||
+    ensures ((!valid_enclave_id(eid))                     ||
              (!tap_enclave_metadata_valid[eid])           || 
              (!tap_enclave_metadata_paused[eid])          ||
              (old(cpu_enclave_id) != tap_null_enc_id))    ==> (status == enclave_op_invalid_arg);
@@ -570,19 +541,17 @@ procedure exit()
     // global TAP invariants.                                               //
     //----------------------------------------------------------------------//
     requires (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
     ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
                
     //----------------------------------------------------------------------//
     // success/failure conditions.                                          //
     //----------------------------------------------------------------------//
-    ensures (old(cpu_enclave_id) == tap_null_enc_id             || 
-             !tap_enclave_metadata_valid[old(cpu_enclave_id)])  ==> (status == enclave_op_failed);
-    ensures (old(cpu_enclave_id) != tap_null_enc_id             &&
-             tap_enclave_metadata_valid[old(cpu_enclave_id)])   ==> (status == enclave_op_success);
+    ensures (old(cpu_enclave_id) == tap_null_enc_id) ==> (status == enclave_op_failed);
+    ensures (old(cpu_enclave_id) != tap_null_enc_id) ==> (status == enclave_op_success);
     ensures (status == enclave_op_success || status == enclave_op_failed);
 
     //----------------------------------------------------------------------//
@@ -649,18 +618,16 @@ procedure pause()
     // global TAP invariants.                                               //
     //----------------------------------------------------------------------//
     requires (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
     ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
     //----------------------------------------------------------------------//
     // success/failure conditions.                                          //
     //----------------------------------------------------------------------//
-    ensures (old(cpu_enclave_id) == tap_null_enc_id             || 
-             !tap_enclave_metadata_valid[old(cpu_enclave_id)])  ==> (status == enclave_op_failed);
-    ensures (old(cpu_enclave_id) != tap_null_enc_id             &&
-             tap_enclave_metadata_valid[old(cpu_enclave_id)])   ==> (status == enclave_op_success);
+    ensures (old(cpu_enclave_id) == tap_null_enc_id) ==> (status == enclave_op_failed);
+    ensures (old(cpu_enclave_id) != tap_null_enc_id) ==> (status == enclave_op_success);
     ensures (status == enclave_op_success || status == enclave_op_failed);
                
     //----------------------------------------------------------------------//
@@ -721,7 +688,6 @@ procedure pause()
 procedure destroy(eid: tap_enclave_id_t)
     returns (status: enclave_op_result_t);
 
-    modifies cpu_mem;
     modifies cpu_owner_map;
     modifies tap_enclave_metadata_regs;
     modifies tap_enclave_metadata_valid;
@@ -731,19 +697,19 @@ procedure destroy(eid: tap_enclave_id_t)
     // global TAP invariants.                                               //
     //----------------------------------------------------------------------//
     requires (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
     ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
 
     //----------------------------------------------------------------------//
     // success/failure conditions.                                          //
     //----------------------------------------------------------------------//
-    ensures (eid == tap_null_enc_id                 || 
+    ensures (!valid_enclave_id(eid)                 || 
              !old(tap_enclave_metadata_valid)[eid]  || 
              cpu_enclave_id != tap_null_enc_id) ==> (status == enclave_op_invalid_arg);
-    ensures (eid != tap_null_enc_id                 && 
+    ensures (valid_enclave_id(eid)                  && 
              old(tap_enclave_metadata_valid)[eid]   && 
              cpu_enclave_id == tap_null_enc_id) ==> (status == enclave_op_success);
     ensures (status == enclave_op_success || status == enclave_op_invalid_arg);
@@ -751,7 +717,6 @@ procedure destroy(eid: tap_enclave_id_t)
     //----------------------------------------------------------------------//
     // nothing changes on failure.                                          //
     //----------------------------------------------------------------------//
-    ensures (status != enclave_op_success ==> cpu_mem == old(cpu_mem));
     ensures (status != enclave_op_success ==> cpu_owner_map == old(cpu_owner_map));
     ensures (status != enclave_op_success ==> cpu_pc == old(cpu_pc));
     ensures (status != enclave_op_success ==> tap_enclave_metadata_regs == old(tap_enclave_metadata_regs));
@@ -767,22 +732,16 @@ procedure destroy(eid: tap_enclave_id_t)
     ensures (status == enclave_op_success) ==>
                 (forall p : wap_addr_t ::
                     (if old(cpu_owner_map)[p] == eid
-                        then (cpu_mem[p] == k0_word_t &&
-                              cpu_owner_map[p] == tap_null_enc_id)
-                        else (cpu_mem[p] == old(cpu_mem)[p] &&
-                              cpu_owner_map[p] == old(cpu_owner_map)[p])));
+                        then (cpu_owner_map[p] == tap_blocked_enc_id)
+                        else (cpu_owner_map[p] == old(cpu_owner_map)[p])));
     ensures (status == enclave_op_success) ==>
                 (forall p : wap_addr_t ::
                     old(cpu_owner_map)[p] == eid ==>
-                        (cpu_mem[p] == k0_word_t &&
-                         cpu_owner_map[p] == tap_null_enc_id));
+                        (cpu_owner_map[p] == tap_blocked_enc_id));
     ensures (status == enclave_op_success) ==>
                 (forall p : wap_addr_t ::
                     old(cpu_owner_map)[p] != eid ==> 
                         cpu_owner_map[p] == old(cpu_owner_map)[p]);
-    ensures (status == enclave_op_success) ==>
-                (forall p : wap_addr_t ::
-                    (old(cpu_owner_map)[p] != eid) ==> cpu_mem[p] == old(cpu_mem)[p]);
     ensures (status == enclave_op_success) ==>
                 (forall e : tap_enclave_id_t :: 
                     tap_enclave_metadata_valid[e] == 
@@ -795,3 +754,73 @@ procedure destroy(eid: tap_enclave_id_t)
                                      else old(tap_enclave_metadata_pc)[e]));
     ensures (status == enclave_op_success) ==>
                 (tap_enclave_metadata_regs[eid] == kzero_regs_t);
+
+// -------------------------------------------------------------------- //
+// Block available memory.                                              //
+// -------------------------------------------------------------------- //
+procedure block_memory_region(bmap : excl_map_t)
+   returns (status : enclave_op_result_t);
+   modifies cpu_owner_map;
+    //----------------------------------------------------------------------//
+    // global TAP invariants.                                               //
+    //----------------------------------------------------------------------//
+    requires (forall pa : wap_addr_t, e : tap_enclave_id_t ::
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
+                    (cpu_owner_map[pa] != e));
+    ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
+                    (cpu_owner_map[pa] != e));
+
+    // success condition.
+    ensures ((forall p : wap_addr_t ::
+                bmap[p] ==> (old(cpu_owner_map)[p] == tap_null_enc_id))
+            <==> (status == enclave_op_success));
+    ensures (status == enclave_op_success || status == enclave_op_invalid_arg);
+
+    // effect on cpu_owner_map
+    ensures (status == enclave_op_success) ==>
+            (forall p : wap_addr_t :: 
+                if bmap[p] 
+                    then cpu_owner_map[p] == tap_blocked_enc_id
+                    else cpu_owner_map[p] == old(cpu_owner_map)[p]);
+    ensures (status != enclave_op_success) ==> 
+                old(cpu_owner_map) == cpu_owner_map;
+                 
+     
+
+   
+// -------------------------------------------------------------------- //
+// Reclaim blocked memory.                                              //
+// -------------------------------------------------------------------- //
+procedure release_blocked_memory(bmap : excl_map_t)
+    returns (status : enclave_op_result_t);
+    modifies cpu_owner_map;
+    modifies cpu_mem;
+
+    //----------------------------------------------------------------------//
+    // global TAP invariants.                                               //
+    //----------------------------------------------------------------------//
+    requires (forall pa : wap_addr_t, e : tap_enclave_id_t ::
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
+                    (cpu_owner_map[pa] != e));
+    ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
+                    (cpu_owner_map[pa] != e));
+
+    // success condition.
+    ensures ((forall p : wap_addr_t ::
+                bmap[p] ==> (old(cpu_owner_map)[p] == tap_blocked_enc_id))
+            <==> (status == enclave_op_success));
+    ensures (status == enclave_op_success || status == enclave_op_invalid_arg);
+
+    // effect on cpu_owner_map
+    ensures (status == enclave_op_success) ==>
+            (forall p : wap_addr_t :: 
+                if bmap[p] 
+                    then (cpu_owner_map[p] == tap_null_enc_id && 
+                          cpu_mem[p] == k0_word_t)
+                    else (cpu_owner_map[p] == old(cpu_owner_map)[p] && 
+                          cpu_mem[p] == old(cpu_mem[p])));
+    ensures (status != enclave_op_success) ==> 
+                (old(cpu_owner_map) == cpu_owner_map &&
+                 old(cpu_mem) == cpu_mem);

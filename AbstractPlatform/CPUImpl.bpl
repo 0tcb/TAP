@@ -1,4 +1,38 @@
 // -------------------------------------------------------------------- // 
+// Initialize TAP.                                                      // 
+// -------------------------------------------------------------------- // 
+implementation initialize_tap()
+{
+  havoc untrusted_addr_map;
+  havoc untrusted_addr_valid;
+  havoc untrusted_addr_map;
+  havoc untrusted_pc;
+  havoc untrusted_regs;
+
+  cpu_enclave_id := tap_null_enc_id;
+  cpu_addr_map := untrusted_addr_map;
+  cpu_addr_valid := untrusted_addr_valid;
+  cpu_pc := untrusted_pc;
+  cpu_regs := untrusted_regs;
+  
+  // memory is all zero'd out.
+  havoc cpu_mem;
+  assume (forall p : wap_addr_t :: cpu_mem[p] == k0_word_t);
+
+  // no enclaves exist.
+  havoc cpu_owner_map;
+  assume (forall pa : wap_addr_t :: cpu_owner_map[pa] == tap_null_enc_id);
+  havoc tap_enclave_metadata_valid;
+  assume (forall e : tap_enclave_id_t :: !tap_enclave_metadata_valid[e]);
+  // and that the PC is in sane state.
+  assume (tap_addr_perm_x(cpu_addr_valid[cpu_pc]));
+  assume (cpu_owner_map[cpu_addr_map[cpu_pc]] == cpu_enclave_id);
+
+  if (cpu_cache_enabled) {
+      call init_cache();
+  }
+}
+// -------------------------------------------------------------------- // 
 // Helper procedures                                                    // 
 // -------------------------------------------------------------------- // 
 procedure do_mappings_alias_v(
@@ -72,6 +106,114 @@ procedure does_enclave_conflict(eid : tap_enclave_id_t)
 }
 
 // -------------------------------------------------------------------- //
+// Modify enclave's private pages.                                      //
+// -------------------------------------------------------------------- //
+implementation modify_owner_map(
+    /* enclave id   */  eid         : tap_enclave_id_t,
+    /* new map      */  excl_paddr  : excl_map_t
+)
+    returns (status : enclave_op_result_t)
+{
+    var va : vaddr_t;
+    var pa : wap_addr_t;
+
+    // must be called from outside the enclave.
+    if (eid == tap_null_enc_id              ||
+        cpu_enclave_id != tap_null_enc_id   ||
+        !tap_enclave_metadata_valid[eid])
+    {
+        status := enclave_op_invalid_arg;
+        return;
+    }
+
+    // can't unmap an address that is in evrange.
+    va := k0_vaddr_t;
+    while (LT_va(va, kmax_vaddr_t))
+        invariant (forall v : vaddr_t :: 
+            (LT_va(v, va) && 
+             tap_enclave_metadata_addr_excl[eid][v] && 
+             tap_addr_perm_v(tap_enclave_metadata_addr_valid[eid][v])) 
+                ==> excl_paddr[tap_enclave_metadata_addr_map[eid][v]]);
+    {
+        if (tap_enclave_metadata_addr_excl[eid][va] && 
+            tap_addr_perm_v(tap_enclave_metadata_addr_valid[eid][va]) &&
+            !excl_paddr[tap_enclave_metadata_addr_map[eid][va]]) 
+        {
+            status := enclave_op_invalid_arg;
+            return;
+        }
+        va := PLUS_va(va, k1_vaddr_t);
+    }
+    if (tap_enclave_metadata_addr_excl[eid][va] && 
+        tap_addr_perm_v(tap_enclave_metadata_addr_valid[eid][va]) &&
+        !excl_paddr[tap_enclave_metadata_addr_map[eid][va]]) 
+    {
+        status := enclave_op_invalid_arg;
+        return;
+    }
+    va := PLUS_va(va, k1_vaddr_t);
+
+    // sanity check.
+    assert (forall v : vaddr_t :: 
+             (tap_enclave_metadata_addr_excl[eid][v] && 
+              tap_addr_perm_v(tap_enclave_metadata_addr_valid[eid][v])) 
+                ==> excl_paddr[tap_enclave_metadata_addr_map[eid][v]]);
+
+    // an address that differs between excl_paddr and cpu_owner must be
+    // either owned by the enclave or the OS.
+    pa := k0_wap_addr_t;
+    while (LT_wapa(pa, kmax_wap_addr_t))
+        invariant (forall p : wap_addr_t :: (LT_wapa(p, pa) && excl_paddr[p]) ==>
+                    (cpu_owner_map[p] == tap_null_enc_id || cpu_owner_map[p] == eid));
+    {
+        if (excl_paddr[pa] && 
+            (cpu_owner_map[pa] != tap_null_enc_id && cpu_owner_map[pa] != eid))
+        {
+            status := enclave_op_invalid_arg;
+            return;
+        }
+        pa := PLUS_wapa(pa, k1_wap_addr_t);
+    }
+    if (excl_paddr[pa] && 
+        (cpu_owner_map[pa] != tap_null_enc_id && cpu_owner_map[pa] != eid))
+    {
+        status := enclave_op_invalid_arg;
+        return;
+    }
+    assert (forall p : wap_addr_t :: excl_paddr[p] ==>
+                (cpu_owner_map[p] == tap_null_enc_id || cpu_owner_map[p] == eid));
+
+    pa := k0_wap_addr_t;
+    while (LT_wapa(pa, kmax_wap_addr_t))
+        /*
+        invariant (forall p : wap_addr_t :: 
+                    if LT_wapa(p, pa)
+                        then cpu_owner_map[p] == eid
+                        else cpu_owner_map[p] == old(cpu_owner_map)[p]);
+        invariant (forall p : wap_addr_t :: LT_wapa(p, pa) ==>
+                    (excl_paddr[p] <==> (cpu_owner_map[p] == eid)));
+        invariant (forall p : wap_addr_t :: 
+                    if (LT_wapa(p, pa) && !excl_paddr[p] && old(cpu_owner_map)[p] == eid) 
+                        then cpu_mem[p] == k0_word_t
+                        else cpu_mem[p] == old(cpu_mem)[p]);
+        */
+    {
+        if (excl_paddr[pa]) { cpu_owner_map[pa] := eid; } 
+        else if (cpu_owner_map[pa] == eid) { 
+            cpu_mem[pa] := k0_word_t;
+            cpu_owner_map[pa] := tap_null_enc_id; 
+        }
+        pa := PLUS_wapa(pa, k1_wap_addr_t);
+    }
+    if (excl_paddr[pa]) { cpu_owner_map[pa] := eid; } 
+    else if (cpu_owner_map[pa] == eid) { cpu_owner_map[pa] := tap_null_enc_id; }
+    /*
+    assert (forall p : wap_addr_t :: 
+                (excl_paddr[p] <==> (cpu_owner_map[p] == eid)));
+    */
+}
+
+// -------------------------------------------------------------------- //
 // Launch an enclave                                                    //
 // -------------------------------------------------------------------- //
 implementation launch(
@@ -98,7 +240,7 @@ implementation launch(
     }
 
     // ensure eid is valid.
-    if (eid == tap_null_enc_id || tap_enclave_metadata_valid[eid]) {
+    if (!valid_enclave_id(eid) || tap_enclave_metadata_valid[eid]) {
         status := enclave_op_invalid_arg;
         return;
     }
@@ -217,7 +359,7 @@ implementation enter(eid: tap_enclave_id_t)
     // no enclave  no enclave id is null.
     // enclave must be valid and not paused.
     // cpu must be ready to execute enclaves.
-    if (eid == tap_null_enc_id              ||
+    if (!valid_enclave_id(eid)              ||
         !tap_enclave_metadata_valid[eid]    ||
         cpu_enclave_id != tap_null_enc_id)
     {
@@ -245,7 +387,7 @@ implementation resume(eid: tap_enclave_id_t)
     returns (status : enclave_op_result_t)
 
 {
-    if (eid == tap_null_enc_id              ||
+    if (!valid_enclave_id(eid)              ||
         !tap_enclave_metadata_valid[eid]    || 
         !tap_enclave_metadata_paused[eid]   ||
         cpu_enclave_id != tap_null_enc_id)
@@ -275,8 +417,7 @@ implementation exit()
 {
     var eid : tap_enclave_id_t;
 
-    // no enclave id is null.
-    if (cpu_enclave_id == tap_null_enc_id || !tap_enclave_metadata_valid[cpu_enclave_id]) {
+    if (cpu_enclave_id == tap_null_enc_id) {
         status := enclave_op_failed;
         return;
     }
@@ -305,12 +446,10 @@ implementation pause()
 {
     var eid : tap_enclave_id_t;
 
-    // no enclave id is null.
-    if (cpu_enclave_id == tap_null_enc_id || !tap_enclave_metadata_valid[cpu_enclave_id]) {
+    if (cpu_enclave_id == tap_null_enc_id) {
         status := enclave_op_failed;
         return;
     }
-
     status := enclave_op_success;
 
     eid                                  := cpu_enclave_id;
@@ -328,13 +467,16 @@ implementation pause()
     status         := enclave_op_success;
 }
 
+// -------------------------------------------------------------------- //
+// Destroy an enclave                                                   //
+// -------------------------------------------------------------------- //
 implementation destroy(eid: tap_enclave_id_t)
     returns (status: enclave_op_result_t)
 
 {
     var pa : wap_addr_t;
     // no enclave id is null.
-    if (eid == tap_null_enc_id || !tap_enclave_metadata_valid[eid] || cpu_enclave_id != tap_null_enc_id) {
+    if (!valid_enclave_id(eid) || !tap_enclave_metadata_valid[eid] || cpu_enclave_id != tap_null_enc_id) {
         status := enclave_op_invalid_arg;
         return;
     }
@@ -348,36 +490,28 @@ implementation destroy(eid: tap_enclave_id_t)
         invariant (forall p : wap_addr_t ::
                         LT_wapa(p, pa) ==>
                             (if old(cpu_owner_map)[p] == eid
-                                then (cpu_mem[p] == k0_word_t &&
-                                      cpu_owner_map[p] == tap_null_enc_id)
-                                else (cpu_mem[p] == old(cpu_mem)[p] &&
-                                      cpu_owner_map[p] == old(cpu_owner_map)[p])));
+                                then (cpu_owner_map[p] == tap_blocked_enc_id)
+                                else (cpu_owner_map[p] == old(cpu_owner_map)[p])));
+
         invariant (forall p : wap_addr_t ::
                         (!LT_wapa(p, pa) ==>
-                            (cpu_mem[p] == old(cpu_mem[p]) &&
-                             cpu_owner_map[p] == old(cpu_owner_map)[p])));
-
+                            (cpu_owner_map[p] == old(cpu_owner_map)[p])));
     {
         if (cpu_owner_map[pa] == eid) {
-            cpu_mem[pa] := k0_word_t;
-            cpu_owner_map[pa] := tap_null_enc_id;
+            cpu_owner_map[pa] := tap_blocked_enc_id;
         }
         pa := PLUS_wapa(pa, k1_wap_addr_t);
     }
     if (cpu_owner_map[kmax_wap_addr_t] == eid) {
-        cpu_mem[kmax_wap_addr_t] := k0_word_t;
-        cpu_owner_map[kmax_wap_addr_t] := tap_null_enc_id;
+        cpu_owner_map[kmax_wap_addr_t] := tap_blocked_enc_id;
     }
     assert (forall p : wap_addr_t ::
                     (if old(cpu_owner_map)[p] == eid
-                        then (cpu_mem[p] == k0_word_t &&
-                              cpu_owner_map[p] == tap_null_enc_id)
-                        else (cpu_mem[p] == old(cpu_mem)[p] &&
-                              cpu_owner_map[p] == old(cpu_owner_map)[p])));
+                        then (cpu_owner_map[p] == tap_blocked_enc_id)
+                        else (cpu_owner_map[p] == old(cpu_owner_map)[p])));
     assert (forall p : wap_addr_t ::
                 old(cpu_owner_map)[p] == eid ==>
-                    (cpu_mem[p] == k0_word_t &&
-                     cpu_owner_map[p] == tap_null_enc_id));
+                    (cpu_owner_map[p] == tap_blocked_enc_id));
 
     assert (forall p : wap_addr_t ::
                 old(cpu_owner_map)[p] != eid ==> 
@@ -390,5 +524,115 @@ implementation destroy(eid: tap_enclave_id_t)
     tap_enclave_metadata_regs[eid]  := kzero_regs_t;
     tap_enclave_metadata_pc[eid]    := k0_vaddr_t;
 
+    status := enclave_op_success;
+}
+
+// -------------------------------------------------------------------- //
+// Block available memory.                                              //
+// -------------------------------------------------------------------- //
+implementation block_memory_region(bmap : excl_map_t) 
+    returns (status : enclave_op_result_t)
+{
+    var pa : wap_addr_t;
+
+    // First make sure that all the addresses in bmap are blocked.
+    pa := k0_wap_addr_t;
+    while (LT_wapa(pa, kmax_wap_addr_t))
+        invariant (forall p : wap_addr_t ::
+                        (LT_wapa(p, pa) && bmap[p]) ==> (cpu_owner_map[p] == tap_null_enc_id));
+
+    {
+        if (bmap[pa] && cpu_owner_map[pa] != tap_null_enc_id) {
+            status := enclave_op_invalid_arg;
+            return;
+        }
+        pa := PLUS_wapa(pa, k1_wap_addr_t);
+    }
+    if (bmap[pa] && cpu_owner_map[pa] != tap_null_enc_id) {
+        status := enclave_op_invalid_arg;
+        return;
+    }
+    assert (forall p : wap_addr_t :: bmap[p] ==> (cpu_owner_map[p] == tap_null_enc_id));
+
+    // Now go around clearing each address in bmap.
+    pa := k0_wap_addr_t;
+    while (LT_wapa(pa, kmax_wap_addr_t))
+        invariant (forall p : wap_addr_t :: bmap[p] ==> 
+                        (if (LT_wapa(p, pa))
+                            then cpu_owner_map[p] == tap_blocked_enc_id
+                            else cpu_owner_map[p] == tap_null_enc_id));
+        invariant (forall p : wap_addr_t ::
+                        if (LT_wapa(p, pa) && bmap[p])
+                            then cpu_owner_map[p] == tap_blocked_enc_id
+                            else cpu_owner_map[p] == old(cpu_owner_map[p]));
+    {
+        if (bmap[pa]) {
+            cpu_owner_map[pa] := tap_blocked_enc_id;
+        }
+        pa := PLUS_wapa(pa, k1_wap_addr_t);
+    }
+    if (bmap[pa]) {
+        cpu_owner_map[pa] := tap_blocked_enc_id;
+    }
+    assert (forall p : wap_addr_t :: 
+            if bmap[p] 
+               then (cpu_owner_map[p] == tap_blocked_enc_id) 
+               else (cpu_owner_map[p] == old(cpu_owner_map)[p]));
+    status := enclave_op_success;
+}
+// -------------------------------------------------------------------- //
+// Reclaim blocked memory.                                              //
+// -------------------------------------------------------------------- //
+implementation release_blocked_memory(bmap : excl_map_t) 
+    returns (status : enclave_op_result_t)
+{
+    var pa : wap_addr_t;
+
+    // First make sure that all the addresses in bmap are blocked.
+    pa := k0_wap_addr_t;
+    while (LT_wapa(pa, kmax_wap_addr_t))
+        invariant (forall p : wap_addr_t ::
+                        (LT_wapa(p, pa) && bmap[p]) ==> (cpu_owner_map[p] == tap_blocked_enc_id));
+
+    {
+        if (bmap[pa] && cpu_owner_map[pa] != tap_blocked_enc_id) {
+            status := enclave_op_invalid_arg;
+            return;
+        }
+        pa := PLUS_wapa(pa, k1_wap_addr_t);
+    }
+    if (bmap[pa] && cpu_owner_map[pa] != tap_blocked_enc_id) {
+        status := enclave_op_invalid_arg;
+        return;
+    }
+    assert (forall p : wap_addr_t :: bmap[p] ==> (cpu_owner_map[p] == tap_blocked_enc_id));
+
+    // Now go around clearing each address in bmap.
+    pa := k0_wap_addr_t;
+    while (LT_wapa(pa, kmax_wap_addr_t))
+        invariant (forall p : wap_addr_t :: bmap[p] ==> 
+                        (if (LT_wapa(p, pa))
+                            then cpu_owner_map[p] == tap_null_enc_id
+                            else cpu_owner_map[p] == tap_blocked_enc_id));
+        invariant (forall p : wap_addr_t ::
+                        if (LT_wapa(p, pa) && bmap[p])
+                            then (cpu_owner_map[p] == tap_null_enc_id && cpu_mem[p] == k0_word_t)
+                            else (cpu_owner_map[p] == old(cpu_owner_map[p]) && cpu_mem[p] == old(cpu_mem)[p]));
+
+    {
+        if (bmap[pa]) {
+            cpu_owner_map[pa] := tap_null_enc_id;
+            cpu_mem[pa] := k0_word_t;
+        }
+        pa := PLUS_wapa(pa, k1_wap_addr_t);
+    }
+    if (bmap[pa]) {
+        cpu_owner_map[pa] := tap_null_enc_id;
+        cpu_mem[pa] := k0_word_t;
+    }
+    assert (forall p : wap_addr_t :: 
+            if bmap[p] 
+               then (cpu_owner_map[p] == tap_null_enc_id && cpu_mem[p] == k0_word_t)
+               else (cpu_owner_map[p] == old(cpu_owner_map)[p] && cpu_mem[p] == old(cpu_mem[p])));
     status := enclave_op_success;
 }

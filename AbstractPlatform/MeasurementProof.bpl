@@ -26,12 +26,14 @@ procedure {:inline 1} MeasurementEnclaveComputation(iter : int)
     var s_data  : word_t;
     var excp    : exception_t;
     var hit     : bool;
+    var way     : cache_way_index_t;
 
     eid := cpu_enclave_id;
     pc_pa := cpu_addr_map[cpu_pc];
     assert tap_enclave_metadata_addr_excl[eid][cpu_pc];
     assert cpu_owner_map[pc_pa] == eid;
-    call pc_op, excp, hit := fetch_va(cpu_pc);
+    havoc way; assume valid_cache_way_index(way);
+    call pc_op, excp, hit := fetch_va(cpu_pc, way);
     assert excp == excp_none;
 
     // two register sources.
@@ -43,7 +45,8 @@ procedure {:inline 1} MeasurementEnclaveComputation(iter : int)
     assume tap_addr_perm_r(cpu_addr_valid[l_vaddr]);
     if(tap_enclave_metadata_addr_excl[eid][l_vaddr]) {
         assert cpu_owner_map[cpu_addr_map[l_vaddr]] == eid;
-        call l_data, excp, hit := load_va(l_vaddr);
+        havoc way; assume valid_cache_way_index(way);
+        call l_data, excp, hit := load_va(l_vaddr, way);
     } else {
         l_data := uf_load_data(l_vaddr, iter);
         excp := excp_none;
@@ -57,7 +60,8 @@ procedure {:inline 1} MeasurementEnclaveComputation(iter : int)
     // update mem if we are writing to private memory.
     if (tap_enclave_metadata_addr_excl[eid][s_vaddr]) {
         assert cpu_owner_map[cpu_addr_map[s_vaddr]] == eid;
-        call excp, hit := store_va(s_vaddr, s_data);
+        havoc way; assume valid_cache_way_index(way);
+        call excp, hit := store_va(s_vaddr, s_data, way);
         assert excp == excp_none;
     }
     // if we're writing to shared memory, there's no point because
@@ -260,13 +264,13 @@ procedure measurement_proof_part1()
   ensures (e_entrypoint_1 == e_entrypoint_2);
   ensures (current_mode == mode_untrusted);
   ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid_1[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid_1[e]) ==> 
                     (cpu_owner_map_1[pa] != e));
   ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-              (e != tap_null_enc_id && !tap_enclave_metadata_valid_2[e]) ==> 
+              (valid_enclave_id(e) && !tap_enclave_metadata_valid_2[e]) ==> 
                   (cpu_owner_map_2[pa] != e));
   // eid is valid.
-  ensures (eid_1 != tap_null_enc_id && eid_2 != tap_null_enc_id);
+  ensures (valid_enclave_id(eid_1) && valid_enclave_id(eid_2));
   ensures (tap_enclave_metadata_valid_1[eid_1] && tap_enclave_metadata_valid_2[eid_2]);
   // the entrypoint always has a vaddr -> paddr mapping.
   ensures tap_addr_perm_x(
@@ -480,13 +484,13 @@ procedure measurement_proof_part2
   requires (forall ri : regindex_t :: valid_regindex(ri) ==> (cpu_regs_1[ri] == cpu_regs_2[ri]));
   requires (e_entrypoint_1 == e_entrypoint_2);
   requires  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid_1[e]) ==> 
-                    (cpu_owner_map_1[pa] != e));
+              (valid_enclave_id(e) && !tap_enclave_metadata_valid_1[e]) ==> 
+                  (cpu_owner_map_1[pa] != e));
   requires  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-              (e != tap_null_enc_id && !tap_enclave_metadata_valid_2[e]) ==> 
+              (valid_enclave_id(e) && !tap_enclave_metadata_valid_2[e]) ==> 
                   (cpu_owner_map_2[pa] != e));
   // eid is valid.
-  requires (eid_1 != tap_null_enc_id && eid_2 != tap_null_enc_id);
+  requires (valid_enclave_id(eid_1) && valid_enclave_id(eid_2));
   requires (tap_enclave_metadata_valid_1[eid_1] && tap_enclave_metadata_valid_2[eid_2]);
   // the entrypoint always has a vaddr -> paddr mapping.
   requires tap_addr_perm_x(
@@ -575,13 +579,13 @@ procedure measurement_proof_part2
     // global TAP invariants.                                               //
     //----------------------------------------------------------------------//
     invariant  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid_1[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid_1[e]) ==> 
                     (cpu_owner_map_1[pa] != e));
     invariant  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid_2[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid_2[e]) ==> 
                     (cpu_owner_map_2[pa] != e));
     // eid is valid.
-    invariant (eid_1 != tap_null_enc_id && eid_2 != tap_null_enc_id);
+    invariant (valid_enclave_id(eid_1) && valid_enclave_id(eid_2));
     invariant (tap_enclave_metadata_valid_1[eid_1] && tap_enclave_metadata_valid_2[eid_2]);
     // the entrypoint always has a vaddr -> paddr mapping.
     invariant tap_addr_perm_x(

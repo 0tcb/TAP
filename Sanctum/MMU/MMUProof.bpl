@@ -80,11 +80,11 @@ procedure havoc_mem(ptbr: ppn_t)
                 bv2bool(pte2valid(load_pte1(mem, ptbr, vpn1))) ==>
                     load_pte0(mem, pte2ppn(load_pte1(mem, ptbr, vpn1)), vpn0) ==
                     load_pte0(old(mem), pte2ppn(load_pte1(old(mem), ptbr, vpn1)), vpn0));
+    ensures (forall va: vaddr_t, access : riscv_access_t ::
+                is_translation_valid(mem, ptbr, access, va) ==
+                is_translation_valid(old(mem), ptbr, access, va));
     ensures (forall va: vaddr_t ::
-                is_translation_valid(mem, ptbr, va) ==
-                is_translation_valid(old(mem), ptbr, va));
-    ensures (forall va: vaddr_t ::
-                is_translation_valid(mem, ptbr, va) ==>
+                is_mapping_valid(mem, ptbr, va) ==>
                     (translate_vaddr2pte(mem, ptbr, va) ==
                      translate_vaddr2pte(old(mem), ptbr, va)));
     ensures (forall pa: wap_addr_t ::
@@ -131,6 +131,7 @@ procedure proof()
     var v_spec, v_impl : bool;
     var vpn: vpn_t;
     var ppn: ppn_t;
+    var access : riscv_access_t;
 
     var s1, s2, fail : bool;
 
@@ -151,23 +152,23 @@ procedure proof()
 
     // A couple of sanity checks.
     assert (forall va : vaddr_t ::
-            does_translation_exist(ptbl_acl_map, ptbr, va) == is_translation_valid(mem, ptbr, va));
+            does_translation_exist(ptbl_acl_map, ptbr, va) == is_mapping_valid(mem, ptbr, va));
 
     // fail==true means alloc_page ran out of physical memory. All bets are off.
     fail := false;
-    while (*)
+    while (!fail)
         // Both abstract and implementation pages must be valid in the same way.
         invariant (forall va : vaddr_t ::
             !fail ==> does_translation_exist(ptbl_acl_map, ptbr, va) ==
-                      is_translation_valid(mem, ptbr, va));
+                      is_mapping_valid(mem, ptbr, va));
         // And both must map to the same PPN.
         invariant (forall va : vaddr_t ::
             (!fail && does_translation_exist(ptbl_acl_map, ptbr, va) &&
-                      is_translation_valid(mem, ptbr, va)) ==>
+                      is_mapping_valid(mem, ptbr, va)) ==>
                 (ptbl_addr_map[ptbr, vaddr2vpn(va)] == translate_vaddr2ppn(mem, ptbr, va)));
         invariant (forall va : vaddr_t ::
             (!fail && does_translation_exist(ptbl_acl_map, ptbr, va) &&
-                      is_translation_valid(mem, ptbr, va)) ==>
+                      is_mapping_valid(mem, ptbr, va)) ==>
                 (ptbl_acl_map[ptbr, vaddr2vpn(va)] == translate_vaddr2acl(mem, ptbr, va)));
         // We don't muck with the PTBR.
         invariant (used_page_map[ptbr]);
@@ -191,26 +192,41 @@ procedure proof()
     {
         havoc vaddr, paddr;
         havoc acl;
+        havoc access;
 
-        if (!fail) {
-            if (*) {
-                call s1 := AbstractSanctum_create_page_table_mapping(ptbr, vaddr, paddr, acl);
-                call s2, used_page_map :=
-                        ConcreteSanctum_create_page_table_mapping(ptbr, used_page_map, vaddr, paddr, acl);
-                if (!s1 || !s2) {
-                    fail := true;
-                }
-            } else if (*) {
-                call havoc_mem(ptbr);
-            } else {
-                assert (!fail);
-                call v_spec, paddr_spec, acl_spec := AbstractRISCV_translate(ptbr, vaddr);
-                call v_impl, paddr_impl, acl_impl := ConcreteRISCV_translate(ptbr, vaddr);
-                assert (v_spec == v_impl);
-                assert (v_spec && v_impl) ==> (acl_spec == acl_impl);
-                assert (v_spec && v_impl) ==> (paddr_spec == paddr_impl);
+        if (*) {
+            call s1 := AbstractSanctum_create_page_table_mapping(ptbr, vaddr, paddr, acl);
+            call s2, used_page_map :=
+                    ConcreteSanctum_create_page_table_mapping(ptbr, used_page_map, vaddr, paddr, acl);
+            if (!s1 || !s2) {
+                fail := true;
             }
+        } else if (*) {
+            call havoc_mem(ptbr);
+        } else {
+            assert (!fail);
+            call v_spec, paddr_spec, acl_spec := AbstractRISCV_translate(ptbr, access, vaddr);
+            call v_impl, paddr_impl, acl_impl := ConcreteRISCV_translate(ptbr, access, vaddr);
+            assert (v_spec == v_impl);
+            assert (v_spec && v_impl) ==> (acl_spec == acl_impl);
+            assert (v_spec && v_impl) ==> (paddr_spec == paddr_impl);
         }
     }
+}
+
+procedure translate.DeterminismCheck()
+{
+    var vaddr : vaddr_t;
+    var cpu_mode : riscv_mode_t;
+    var cpu_mode_pum, cpu_mode_mxr : bool;
+    var valid, valid1 : bool;
+    var b, b1, c, c1, d, d1 : bool;
+    var mask, mask1, base, base1, paddr, paddr1 : paddr_t;
+    var acl, acl1 : pte_acl_t;
+
+    call valid, paddr, acl := translate(vaddr, riscv_access_read, cpu_mode, cpu_mode_pum, cpu_mode_mxr);
+    call valid1, paddr1, acl1 := translate(vaddr, riscv_access_read, cpu_mode, cpu_mode_pum, cpu_mode_mxr);
+
+    assert valid <==> valid1;
 }
 // ----------------------------------------------------------------- //

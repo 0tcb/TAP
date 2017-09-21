@@ -18,6 +18,7 @@ function register_update_function(seed: int) : bv32;
 const cpu_mode_const : riscv_mode_t;
 const cpu_mode_pum_const : bool;
 const cpu_mode_mxr_const : bool;
+axiom cpu_mode_mxr_const == false;
 
 procedure {:inline 1} RISCV_ISA_load(vaddr: vaddr_t) returns (data: word_t, exn: bool)
 {

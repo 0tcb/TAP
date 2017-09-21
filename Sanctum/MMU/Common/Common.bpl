@@ -6,6 +6,17 @@ function {:inline} does_translation_exist(ptbl_acl_map: ptbl_acl_map_t, ptbr: pp
     acl2valid(ptbl_acl_map[ptbr, vaddr2vpn(vaddr)])
 }
 
+function {:inline} valid_translation(ptbl_acl_map: ptbl_acl_map_t, ptbr: ppn_t, access: riscv_access_t, vaddr: vaddr_t): bool
+{
+    if (access == riscv_access_read) 
+        then acl2valid(ptbl_acl_map[ptbr, vaddr2vpn(vaddr)]) && acl2read(ptbl_acl_map[ptbr, vaddr2vpn(vaddr)])
+        else (if (access == riscv_access_write)
+                 then acl2valid(ptbl_acl_map[ptbr, vaddr2vpn(vaddr)]) && acl2write(ptbl_acl_map[ptbr, vaddr2vpn(vaddr)])
+                 else (if (access == riscv_access_fetch)
+                        then acl2valid(ptbl_acl_map[ptbr, vaddr2vpn(vaddr)]) && acl2exec(ptbl_acl_map[ptbr, vaddr2vpn(vaddr)])
+                        else false))
+}
+
 function {:inline} translate_vaddr2paddr(addr_map: ptbl_addr_map_t, ptbr: ppn_t, vaddr: vaddr_t): paddr_t
 {
     addr_map[ptbr, vaddr2vpn(vaddr)] ++ vaddr2offset(vaddr)
@@ -22,7 +33,7 @@ function {:inline} pte1valid(mem: mem_t, base: ppn_t, vpn1: vpn1_t) : bool
 //
 // Are both levels of the page table valid?
 //
-function {:inline} is_translation_valid(mem: mem_t, base: ppn_t, vaddr: vaddr_t ) : bool
+function {:inline} is_mapping_valid(mem: mem_t, base: ppn_t, vaddr: vaddr_t ) : bool
 {
     // TODO: check for permissions. Handle big pages.
     // Read the first-level, ensure its valid.
@@ -32,6 +43,27 @@ function {:inline} is_translation_valid(mem: mem_t, base: ppn_t, vaddr: vaddr_t 
                 load_pte0(mem,
                           pte2ppn(load_pte1(mem, base, vaddr2vpn1(vaddr))),
                           vaddr2vpn0(vaddr))))
+}
+//
+// Are both levels of the page table valid and are the permissions correct?
+//
+function {:inline} is_translation_valid(mem: mem_t, base: ppn_t, access : riscv_access_t, vaddr: vaddr_t ) : bool
+{
+    // TODO: check for permissions. Handle big pages.
+    // Read the first-level, ensure its valid.
+    bv2bool(pte2valid(load_pte1(mem, base, vaddr2vpn1(vaddr)))) &&
+    // Read the second-level, return its valid.
+    bv2bool(pte2valid(
+                load_pte0(mem,
+                          pte2ppn(load_pte1(mem, base, vaddr2vpn1(vaddr))),
+                          vaddr2vpn0(vaddr)))) &&
+    (if (access == riscv_access_read)
+        then (acl2read(pte2acl(load_pte0(mem, pte2ppn(load_pte1(mem, base, vaddr2vpn1(vaddr))), vaddr2vpn0(vaddr)))))
+        else (if (access == riscv_access_write) 
+                 then (acl2write(pte2acl(load_pte0(mem, pte2ppn(load_pte1(mem, base, vaddr2vpn1(vaddr))), vaddr2vpn0(vaddr)))))
+                 else (if (access == riscv_access_fetch)
+                          then (acl2exec(pte2acl(load_pte0(mem, pte2ppn(load_pte1(mem, base, vaddr2vpn1(vaddr))), vaddr2vpn0(vaddr)))))
+                          else false)))
 }
 //
 // Function that traverses both levels of the PTE. Returns leaf. Use only when

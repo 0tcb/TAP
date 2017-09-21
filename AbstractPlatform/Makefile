@@ -19,7 +19,7 @@ MEASUREMENT_TARGET:=$(BUILD)/Measure.xml
 MEASUREMENT_PROOF_TARGET=$(BUILD)/MeasurementProof.xml
 TEMP_PROOF_TARGET:=$(BUILD)/temp.xml
 
-COMMON_FILES:=$(COMMON)/Types.bpl $(COMMON)/Cache.bpl
+COMMON_FILES:=$(COMMON)/Types.bpl $(COMMON)/Common.bpl $(COMMON)/Cache.bpl
 ATP_COMMON_FILES:=Types.bpl $(COMMON_FILES)
 CPU_FILES:=CPU.bpl
 CPU_IMPL_FILES:=CPUImpl.bpl

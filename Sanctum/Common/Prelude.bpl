@@ -190,6 +190,26 @@ function {:bvbuiltin "bvsle"} SLE_pa(p1: paddr_t, p2: paddr_t) : bool;
 function {:bvbuiltin "bvneg"} NEG_pa(p1: paddr_t) : paddr_t;
 function {:bvbuiltin "bvnot"} NOT_pa(p1: paddr_t) : paddr_t;
 
+function {:bvbuiltin "bvadd"} PLUS_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvsub"} MINUS_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvmul"} TIMES_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvmod"} MOD_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvsmod"} SMOD_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvshl"} LSHIFT_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvlshr"} RSHIFT_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvashr"} ARSHIFT_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvand"} AND_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvor"} OR_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvxor"} XOR_vpn(p1: vpn_t, p2: vpn_t) : vpn_t;
+function {:bvbuiltin "bvult"} LT_vpn(p1: vpn_t, p2: vpn_t) : bool;
+function {:bvbuiltin "bvule"} LE_vpn(p1: vpn_t, p2: vpn_t) : bool;
+function {:bvbuiltin "bvugt"} GT_vpn(p1: vpn_t, p2: vpn_t) : bool;
+function {:bvbuiltin "bvuge"} GE_vpn(p1: vpn_t, p2: vpn_t) : bool;
+function {:bvbuiltin "bvslt"} SLT_vpn(p1: vpn_t, p2: vpn_t) : bool;
+function {:bvbuiltin "bvsle"} SLE_vpn(p1: vpn_t, p2: vpn_t) : bool;
+function {:bvbuiltin "bvneg"} NEG_vpn(p1: vpn_t) : vpn_t;
+function {:bvbuiltin "bvnot"} NOT_vpn(p1: vpn_t) : vpn_t;
+
 function {:bvbuiltin "bvadd"} PLUS_vpn0(p1: vpn0_t, p2: vpn0_t) : vpn0_t;
 function {:bvbuiltin "bvsub"} MINUS_vpn0(p1: vpn0_t, p2: vpn0_t) : vpn0_t;
 function {:bvbuiltin "bvmul"} TIMES_vpn0(p1: vpn0_t, p2: vpn0_t) : vpn0_t;
@@ -273,6 +293,9 @@ function {:bvbuiltin "bvnot"} NOT_ppn(p1: ppn_t) : ppn_t;
 function {:bvbuiltin "bvule"} LE_r(p1: region_t, p2: region_t) : bool;
 function {:bvbuiltin "bvult"} LT_r(p1: region_t, p2: region_t) : bool;
 function {:bvbuiltin "bvadd"} PLUS_r(p1: region_t, p2: region_t) : region_t;
+
+function {:bvbuiltin "bvult"} LT_wpo(p1: wpoffset_t, p2: wpoffset_t) : bool;
+function {:bvbuiltin "bvadd"} PLUS_wpo(p1: wpoffset_t, p2: wpoffset_t) : wpoffset_t;
 
 function {:bvbuiltin "bvmul"} TIMES_128(p1: bv128, p2: bv128) : bv128;
 

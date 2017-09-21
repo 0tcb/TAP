@@ -4,6 +4,10 @@ type riscv_access_t;
 const unique riscv_access_read: riscv_access_t;
 const unique riscv_access_write: riscv_access_t;
 const unique riscv_access_fetch: riscv_access_t;
+function {:inline} valid_access(a : riscv_access_t) : bool {
+  a == riscv_access_read    || a == riscv_access_write   || a == riscv_access_fetch
+}
+
 axiom (forall ra: riscv_access_t :: (ra == riscv_access_read    ||
                                      ra == riscv_access_write   ||
                                      ra == riscv_access_fetch));
@@ -46,6 +50,9 @@ axiom k1_paddr_t == 1bv24;
 /* constant vaddr_t values. */
 const kPGSZ_vaddr_t : vaddr_t;
 axiom kPGSZ_vaddr_t == 4096bv32;
+/* const wap_addr_t values. */
+const kPGSZ_wap_addr_t : wap_addr_t;
+axiom kPGSZ_wap_addr_t == 4096bv22;
 /* constant ppn_t values. */
 const k0_ppn_t : ppn_t;
 axiom k0_ppn_t == 0bv12;
@@ -53,12 +60,21 @@ const k1_ppn_t : ppn_t;
 axiom k1_ppn_t == 1bv12;
 const k2_ppn_t : ppn_t;
 axiom k2_ppn_t == 2bv12;
+/* constant vpn_t values. */
+const k0_vpn_t : vpn_t;
+axiom k0_vpn_t == 0bv20;
+const k1_vpn_t : vpn_t;
+axiom k1_vpn_t == 1bv20;
+const kmax_vpn_t : vpn_t;
+axiom kmax_vpn_t == 1048575bv20;
 /* constant vpn1ex_t values. */
 const k0_vpn1ex : vpn1ex_t;
 axiom k0_vpn1ex == 0bv11;
 const k1_vpn1ex : vpn1ex_t;
 axiom k1_vpn1ex == 1bv11;
 /* constant pte_acl_t values. */
+const k_pg_invalid_acl : pte_acl_t;
+axiom k_pg_invalid_acl == 0bv10;
 const k_pg_valid_acl : pte_acl_t;
 axiom k_pg_valid_acl == 1bv10;
 /* constant bitmap_t values. */
@@ -91,9 +107,23 @@ axiom kEV_BASE_vaddr_t == 4294901760bv32;
 const kEV_MASK_vaddr_t : vaddr_t;
 axiom kEV_MASK_vaddr_t == 65535bv32;
 
+const k0_wpoffset_t : wpoffset_t;
+axiom k0_wpoffset_t == 0bv10;
+const k1_wpoffset_t : wpoffset_t;
+axiom k1_wpoffset_t == 1bv10;
+const kN_wpoffset_t : wpoffset_t;
+axiom kN_wpoffset_t == 1023bv10;
+
 const k0_wpoffset1ex_t : wpoffset1ex_t;
 axiom k0_wpoffset1ex_t  == 0bv11;
 const k1_wpoffset1ex_t : wpoffset1ex_t;
 axiom k1_wpoffset1ex_t  == 1bv11;
 const k1024_wpoffset1ex_t : wpoffset1ex_t;
 axiom k1024_wpoffset1ex_t  == 1024bv11;
+
+const kmax_pte_acl_t_as_int : int;
+axiom kmax_pte_acl_t_as_int == 1023; // max(bv10)
+
+function pte_acl2int(va : pte_acl_t) : int;
+axiom (forall v1, v2 : pte_acl_t :: (v1 != v2) ==> (pte_acl2int(v1) != pte_acl2int(v2)));
+axiom (forall w : pte_acl_t :: pte_acl2int(w) >= 0 && pte_acl2int(w) <= kmax_pte_acl_t_as_int);

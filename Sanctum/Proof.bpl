@@ -17,6 +17,7 @@ procedure {:inline 1} adversarial_monitor_call()
            enclave_metadata_dram_region_count,
            enclave_metadata_last_load_addr,
            enclave_metadata_thread_count,
+           enclave_metadata_measurement,
            thread_metadata_valid,
            thread_metadata_eid,
            thread_metadata_entry_pc,
@@ -31,7 +32,8 @@ procedure {:inline 1} adversarial_monitor_call()
            cpu_edrbmap,
            blocked_at,
            dram_regions_info_block_clock,
-           core_flushed_at;
+           core_flushed_at,
+           mem;
 {
   var region: region_t;
   var result: api_result_t;
@@ -79,7 +81,7 @@ procedure {:inline 1} adversarial_monitor_call()
     call result := delete_thread(tid);
   } else if (*) {
     havoc eid;
-    call result := delete_enclave(tid);
+    call result := delete_enclave(eid);
   }
 }
 
@@ -95,6 +97,7 @@ procedure {:inline 1} adversarial_os_computation()
            enclave_metadata_dram_region_count,
            enclave_metadata_last_load_addr,
            enclave_metadata_thread_count,
+           enclave_metadata_measurement,
            //ptbl_addr_map,
            //ptbl_acl_map,
            thread_metadata_valid,
@@ -168,6 +171,7 @@ procedure {:inline 1} adversarial_os_computation()
 procedure {:inline 1} initialize_page_tables(eid : enclave_id_t, tid: thread_id_t, enclave_dram_region: region_t)
   modifies ptbl_addr_map, ptbl_acl_map;
   modifies enclave_metadata_load_eptbr, cpu_ptbr;
+  modifies enclave_metadata_measurement;
 {
   var vaddr : vaddr_t;
   var paddr : paddr_t;
@@ -213,6 +217,7 @@ procedure {:inline 1} launch(used_page_map: used_page_map_t)
            enclave_metadata_dram_region_count,
            enclave_metadata_last_load_addr,
            enclave_metadata_thread_count,
+           enclave_metadata_measurement,
            thread_metadata_valid,
            thread_metadata_eid,
            thread_metadata_entry_pc,
@@ -383,6 +388,7 @@ procedure AdversaryIsolationProof()
            enclave_metadata_dram_region_count,
            enclave_metadata_last_load_addr,
            enclave_metadata_thread_count,
+           enclave_metadata_measurement,
            thread_metadata_valid,
            thread_metadata_eid,
            thread_metadata_entry_pc,
@@ -436,7 +442,7 @@ procedure AdversaryIsolationProof()
     invariant core_info_enclave_id == null_enclave_id;
     //invariant owner[0bv3] == null_enclave_id;
     //invariant owner[k_metadata_region_t] == metadata_enclave_id;
-    invariant enclave_metadata_valid[launched_eid] && enclave_metadata_is_initialized[launched_eid];
+    invariant enclave_metadata_valid[launched_eid] ==> enclave_metadata_is_initialized[launched_eid];
     invariant (forall eid: enclave_id_t ::
       (enclave_metadata_is_initialized[eid] && enclave_metadata_valid[eid]) ==> (assigned(eid)));
     invariant (forall eid: enclave_id_t ::

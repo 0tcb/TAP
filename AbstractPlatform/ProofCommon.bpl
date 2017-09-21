@@ -275,18 +275,13 @@ procedure InitialHavoc()
     //----------------------------------------------------------------------//
     ensures (cpu_enclave_id == tap_null_enc_id);
     ensures  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                     (cpu_owner_map[pa] != e));
     // current pc invariants
     ensures (tap_addr_perm_x(cpu_addr_valid[cpu_pc]));
     ensures (cpu_owner_map[cpu_addr_map[cpu_pc]] == cpu_enclave_id);
-    // OS invariants.
-    ensures (cpu_enclave_id != tap_null_enc_id) ==> (tap_addr_perm_x(untrusted_addr_valid[untrusted_pc]));
-    ensures (cpu_enclave_id != tap_null_enc_id) ==> (cpu_owner_map[untrusted_addr_map[untrusted_pc]] == tap_null_enc_id);
-    // CPU/enclave invariants.
-    ensures (cpu_enclave_id != tap_null_enc_id ==> tap_enclave_metadata_valid[cpu_enclave_id]);
     // enclave invariants.
-    ensures (!tap_enclave_metadata_valid[tap_null_enc_id]);
+    ensures (forall e : tap_enclave_id_t :: !valid_enclave_id(e) ==> !tap_enclave_metadata_valid[e]);
     ensures (forall e : tap_enclave_id_t ::
                 tap_enclave_metadata_valid[e] ==> 
                     tap_addr_perm_x(tap_enclave_metadata_addr_valid[e][tap_enclave_metadata_pc[e]]));

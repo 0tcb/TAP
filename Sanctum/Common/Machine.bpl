@@ -180,8 +180,9 @@ function {:inline} dram_region_for(pa: paddr_t) : region_t
   { pa[15:12] } //extract bits 14 - 12, even with rotation. Rotation happens on paddr
 function {:inline} dram_region_for_w(pa: wap_addr_t) : region_t
   { pa[13:10] } //extract bits 14 - 12, even with rotation. Rotation happens on paddr
+function cache_index_to_int(index : bv9) : int;
 function {:inline} sanctum_paddr2set_w(pa : wap_addr_t) : cache_set_index_t
-  { dram_region_for_w(pa) ++ pa[19:13] }
+  { cache_index_to_int(dram_region_for_w(pa) ++ pa[19:13]) }
 function {:inline} is_word_aligned(pa: paddr_t) : bool
   { pa[2:0] == 0bv2 }
 
@@ -195,6 +196,8 @@ function {:inline} is_aligned_to_mask_va(addr: vaddr_t, mask: vaddr_t): bool
   { AND_32(addr, mask) == 0bv32 }
 function {:inline} is_valid_range_va(base: vaddr_t, mask: vaddr_t) : bool
   { is_aligned_to_mask_va(base, mask) && is_valid_range_mask_va(mask) }
+function {:inline} is_in_evrange(evbase : vaddr_t, evmask : vaddr_t, addr : vaddr_t) : bool
+  { AND_va(addr, evmask) == evbase }
 function {:inline} is_valid_range_mask_pa(mask: paddr_t) : bool
   { AND_pa(mask, PLUS_pa(mask, k1_paddr_t)) == k0_paddr_t }
 function {:inline} is_aligned_to_mask_pa(addr: paddr_t, mask: paddr_t): bool

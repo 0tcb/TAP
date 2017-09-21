@@ -32,12 +32,17 @@ procedure {:inline 1} MemObserverComputation(
     var valid        : addr_perm_t;
     var paddr        : wap_addr_t;
     var status       : enclave_op_result_t;
+    var l_way, s_way : cache_way_index_t;
+
+    assume valid_cache_way_index(l_way);
+    assume valid_cache_way_index(s_way);
 
     cpu_pc := r_pc;
     cpu_regs[r_write] := r_data;
-    call excp, hit_1 := store_va(s_vaddr, s_data);
-
-    call l_word, excp, hit_2 := load_va(l_vaddr);
+    // store
+    call excp, hit_1 := store_va(s_vaddr, s_data, s_way);
+    // load
+    call l_word, excp, hit_2 := load_va(l_vaddr, l_way);
     r_word := cpu_regs[r_read];
     observation := uf_observation_mem(cpu_pc, l_word, r_word);
 
@@ -54,10 +59,13 @@ procedure {:inline 1} CacheObserverComputation(
     /* mem. to read/write.      */  l_vaddr: vaddr_t, s_vaddr: vaddr_t, s_data : word_t,
     /* "pt" entry to read       */  r_pt_eid : tap_enclave_id_t, r_pt_va : vaddr_t,
     /* "pt" entry to change.    */  pt_eid : tap_enclave_id_t, pt_vaddr: vaddr_t, 
-    /* "pt" entry to change.    */  pt_valid: addr_perm_t, pt_paddr: wap_addr_t)
+    /* "pt" entry to change.    */  pt_valid: addr_perm_t, pt_paddr: wap_addr_t,
+    /* ways to change.          */  l_way, s_way : cache_way_index_t)
     returns (observation : word_t)
     requires valid_regindex(r_read);
     requires valid_regindex(r_write);
+    requires valid_cache_way_index(s_way);
+    requires valid_cache_way_index(l_way);
  
     modifies cpu_mem;
     modifies cpu_regs;
@@ -80,11 +88,9 @@ procedure {:inline 1} CacheObserverComputation(
 
     cpu_pc := r_pc;
     cpu_regs[r_write] := r_data;
-    call excp, hit_1 := store_va(s_vaddr, s_data);
-
+    call excp, hit_1 := store_va(s_vaddr, s_data, s_way);
     call valid, paddr := get_enclave_addr_map(r_pt_eid, r_pt_va);
-
-    call l_word, excp, hit_2 := load_va(l_vaddr);
+    call l_word, excp, hit_2 := load_va(l_vaddr, l_way);
     r_word := cpu_regs[r_read];
     observation := uf_observation_cache(hit_1, hit_2);
 
@@ -124,6 +130,10 @@ procedure {:inline 1} PTObserverComputation(
     var valid        : addr_perm_t;
     var paddr        : wap_addr_t;
     var status       : enclave_op_result_t;
+    var l_way, s_way : cache_way_index_t;
+
+    assume valid_cache_way_index(l_way);
+    assume valid_cache_way_index(s_way);
 
     // make observation.
     call valid, paddr := get_enclave_addr_map(r_pt_eid, r_pt_va);
@@ -132,7 +142,7 @@ procedure {:inline 1} PTObserverComputation(
     // change state.
     cpu_pc := r_pc;
     cpu_regs[r_write] := r_data;
-    call excp, hit_1 := store_va(s_vaddr, s_data);
+    call excp, hit_1 := store_va(s_vaddr, s_data, s_way);
     if (pt_eid == tap_null_enc_id) {
         call set_addr_map(pt_vaddr, pt_paddr, pt_valid);
     } else {
@@ -165,7 +175,9 @@ procedure {:inline 1} ObserverStep(
     /* Private Mem Map   */ r_excl_map        : excl_map_t,
     /* Container Valid   */ r_container_valid : container_valid_t,
     /* Container Data    */ r_container_data  : container_data_t,
-    /* Entrypoint        */ r_entrypoint      : vaddr_t)
+    /* Entrypoint        */ r_entrypoint      : vaddr_t,
+    /* blocked mem       */ r_bmap            : excl_map_t,
+    /* ways to change.   */ l_way, s_way      : cache_way_index_t)
 
     returns (observation: word_t, next_mode : mode_t, enclave_dead : bool, status : enclave_op_result_t)
     // PC stays reasonable.
@@ -175,6 +187,9 @@ procedure {:inline 1} ObserverStep(
     requires (observer == k_mem_observer_t   || 
               observer == k_cache_observer_t ||
               observer == k_pt_observer_t);
+
+    requires valid_cache_way_index(s_way);
+    requires valid_cache_way_index(l_way);
 
     modifies cpu_mem;
     modifies cpu_regs;
@@ -216,7 +231,8 @@ procedure {:inline 1} ObserverStep(
             call observation := CacheObserverComputation(r_pc, r_read, r_write, r_data,
                                                          l_vaddr, s_vaddr, s_data,
                                                          r_pt_eid, r_pt_va,
-                                                         pt_eid, pt_vaddr, pt_valid, pt_paddr);
+                                                         pt_eid, pt_vaddr, pt_valid, pt_paddr,
+                                                         l_way, s_way);
         } else {
             call observation := PTObserverComputation(r_pc, r_read, r_write, r_data,
                                                       l_vaddr, s_vaddr, s_data,
@@ -256,6 +272,10 @@ procedure {:inline 1} ObserverStep(
         }
     } else if (op == tap_proof_op_pause) {
         call status := pause();
+    } else if (op == tap_proof_op_release) {
+        call status := release_blocked_memory(r_bmap);
+    } else if (op == tap_proof_op_block) {
+        call status := block_memory_region(r_bmap);
     }
 }
 
@@ -266,8 +286,8 @@ procedure {:inline 1} EnclaveStep(
 
     returns (
         /* mode     */  next_mode : mode_t, 
-        /* read     */  load_addr : vaddr_t, 
-        /* store    */  store_addr : vaddr_t, store_data : word_t
+        /* read     */  load_addr : vaddr_t, l_way : cache_way_index_t,
+        /* store    */  store_addr : vaddr_t, store_data : word_t, s_way : cache_way_index_t
     )
     
     modifies cpu_mem;
@@ -293,6 +313,7 @@ procedure {:inline 1} EnclaveStep(
     var status : enclave_op_result_t;
     var hit    : bool;
     var owner  : tap_enclave_id_t;
+    var way    : cache_way_index_t;
 
     if (op == tap_proof_op_compute) {
         // do whatever.
@@ -303,7 +324,8 @@ procedure {:inline 1} EnclaveStep(
         assume tap_enclave_metadata_addr_excl[eid][cpu_pc];
         assume tap_addr_perm_x(cpu_addr_valid[cpu_pc]);
         assert cpu_owner_map[cpu_addr_map[cpu_pc]] == eid;
-        call word, excp, hit := fetch_va(cpu_pc);
+        havoc way; assume valid_cache_way_index(way);
+        call word, excp, hit := fetch_va(cpu_pc, way);
         assert (excp == excp_none);
 
         // load from whereever inside the enclave.
@@ -311,7 +333,8 @@ procedure {:inline 1} EnclaveStep(
         assume tap_addr_perm_r(cpu_addr_valid[load_addr]);
         owner := cpu_owner_map[cpu_addr_map[load_addr]];
         assume owner == eid || owner == tap_null_enc_id;
-        call word, excp, hit := load_va(load_addr);
+        havoc l_way; assume valid_cache_way_index(l_way);
+        call word, excp, hit := load_va(load_addr, l_way);
         assert (excp == excp_none);
 
         // store whatever inside the enclave.
@@ -319,7 +342,8 @@ procedure {:inline 1} EnclaveStep(
         assume tap_addr_perm_w(cpu_addr_valid[store_addr]);
         owner := cpu_owner_map[cpu_addr_map[store_addr]];
         assume owner == eid || owner == tap_null_enc_id;
-        call excp, hit := store_va(store_addr, store_data);
+        havoc s_way; assume valid_cache_way_index(s_way);
+        call excp, hit := store_va(store_addr, store_data, s_way);
         assert excp == excp_none;
         store_data := store_data;
 

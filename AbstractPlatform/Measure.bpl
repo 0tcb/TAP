@@ -1,34 +1,6 @@
-// -------------------------------------------------------------------------//
-// Hash.                                                                    //
-// -------------------------------------------------------------------------//
-function update_digest(x : int, m : measurement_t) : measurement_t;
-
-//--------------------------------------------------------------------------//
-// utility fns                                                              //
-//--------------------------------------------------------------------------//
-function word2int(w : word_t) : int;
-axiom (forall w1, w2 : word_t :: (w1 != w2) ==> (word2int(w1) != word2int(w2)));
-axiom (forall w : word_t :: word2int(w) >= 0 && word2int(w) <= kmax_word_t_as_int);
-
-function vaddr2int(va : vaddr_t) : int;
-axiom (forall v1, v2 : vaddr_t :: (v1 != v2) ==> (vaddr2int(v1) != vaddr2int(v2)));
-axiom (forall w : vaddr_t :: vaddr2int(w) >= 0 && vaddr2int(w) <= kmax_vaddr_t_as_int);
-
 function addrperm2int(p : addr_perm_t) : int;
 axiom (forall v1, v2 : addr_perm_t :: (v1 != v2) ==> (addrperm2int(v1) != addrperm2int(v2)));
 axiom (forall w : addr_perm_t :: addrperm2int(w) >= 0 && addrperm2int(w) <= kmax_addr_perm_t_as_int);
-
-//--------------------------------------------------------------------------//
-// collision resistant                                                      //
-//--------------------------------------------------------------------------//
-axiom (forall x1, x2 : int, t1, t2 : measurement_t :: 
-            ((x1 != x2) || (t1 != t2)) <==> (update_digest(x1, t1) != update_digest(x2, t2)));
-//--------------------------------------------------------------------------//
-// second-preimage resistant                                                //
-//--------------------------------------------------------------------------//
-axiom (forall x1, x2 : int, t1, t2 : measurement_t ::
-            (update_digest(x1, t1) == update_digest(x2, t2)) <==> (x1 == x2 && t1 == t2));
-
 
 function valid_regindex_le(ri : regindex_t, rmax : regindex_t) : bool 
 { LE_ri(k0_regindex_t, ri) && LE_ri(ri, rmax) }
@@ -225,7 +197,8 @@ procedure {:inline 1} measure()
 {
     var temp : measurement_t;
     measurement := 0;
-    if (cpu_enclave_id == tap_null_enc_id) {
+    if (!valid_enclave_id(cpu_enclave_id)        ||
+        !tap_enclave_metadata_valid[cpu_enclave_id]) {
         status := enclave_op_invalid_arg;
         return;
     }

@@ -78,11 +78,8 @@ function tap_addr_perm_eq(p1 : addr_perm_t, p2 : addr_perm_t) : bool
 // enclave types.                                                       //
 // -------------------------------------------------------------------- //
 type tap_enclave_id_t                   = int;
-type measurement_t                      = int;
 type tap_thread_id_t                    = int;
 type count_t                            = int;
-const k0_measurement_t : measurement_t;
-axiom k0_measurement_t == 0;
 const k0_tap_thread_id_t : tap_thread_id_t;
 axiom k0_tap_thread_id_t == 0;
 
@@ -129,6 +126,9 @@ const unique tap_proof_op_resume     : tap_proof_op_t;
 const unique tap_proof_op_pause      : tap_proof_op_t;
 const unique tap_proof_op_compute    : tap_proof_op_t;
 const unique tap_proof_op_destroy    : tap_proof_op_t;
+const unique tap_proof_op_release    : tap_proof_op_t;
+const unique tap_proof_op_block      : tap_proof_op_t;
+
 axiom (forall o : tap_proof_op_t :: 
         o == tap_proof_op_compute   ||
         o == tap_proof_op_destroy   ||
@@ -136,13 +136,16 @@ axiom (forall o : tap_proof_op_t ::
         o == tap_proof_op_exit      ||
         o == tap_proof_op_launch    ||
         o == tap_proof_op_resume    ||
-        o == tap_proof_op_pause);
+        o == tap_proof_op_pause     ||
+        o == tap_proof_op_release   ||
+        o == tap_proof_op_block);
 function tap_proof_op_valid(o : tap_proof_op_t) : bool 
 {
     o == tap_proof_op_compute   || o == tap_proof_op_destroy   ||
     o == tap_proof_op_enter     || o == tap_proof_op_exit      ||
     o == tap_proof_op_launch    || o == tap_proof_op_resume    ||
-    o == tap_proof_op_pause
+    o == tap_proof_op_pause     || o == tap_proof_op_release   ||
+    o == tap_proof_op_block
 }
 
 function tap_proof_op_valid_in_enclave(o : tap_proof_op_t) : bool
@@ -157,6 +160,34 @@ function tap_proof_op_valid_in_enclave(o : tap_proof_op_t) : bool
 // -------------------------------------------------------------------- //
 const tap_null_enc_id : tap_enclave_id_t;
 axiom tap_null_enc_id == 0;
+const tap_blocked_enc_id : tap_enclave_id_t;
+axiom tap_blocked_enc_id == 1;
+const tap_user_def_enc_id_1 : tap_enclave_id_t;
+axiom tap_user_def_enc_id_1 == 2;
+const tap_user_def_enc_id_2 : tap_enclave_id_t;
+axiom tap_user_def_enc_id_2 == 3;
+const tap_user_def_enc_id_3 : tap_enclave_id_t;
+axiom tap_user_def_enc_id_3 == 4;
+const tap_user_def_enc_id_4 : tap_enclave_id_t;
+axiom tap_user_def_enc_id_4 == 5;
+const tap_user_def_enc_id_5 : tap_enclave_id_t;
+axiom tap_user_def_enc_id_5 == 6;
+
+function valid_enclave_id(id : tap_enclave_id_t) : bool
+{ 
+  id != tap_null_enc_id       && id != tap_blocked_enc_id    &&
+  id != tap_user_def_enc_id_1 && id != tap_user_def_enc_id_2 &&
+  id != tap_user_def_enc_id_3 && id != tap_user_def_enc_id_4 &&
+  id != tap_user_def_enc_id_5
+}
+
+function special_enclave_id(id : tap_enclave_id_t) : bool
+{
+  id == tap_blocked_enc_id    || id == tap_user_def_enc_id_1 ||
+  id == tap_user_def_enc_id_2 || id == tap_user_def_enc_id_3 ||
+  id == tap_user_def_enc_id_4 || id == tap_user_def_enc_id_5
+}
+
 // -------------------------------------------------------------------- //
 
 // -------------------------------------------------------------------- //

@@ -52,6 +52,7 @@ implementation InitialHavoc()
     var r_word            : word_t;
     var r_valid           : addr_perm_t;
     var r_excp            : exception_t;
+    var repl_way          : cache_way_index_t;
     var done              : bool;
     var hit               : bool;
 
@@ -66,22 +67,25 @@ implementation InitialHavoc()
         // current pc invariants
         invariant (tap_addr_perm_x(cpu_addr_valid[cpu_pc]));
         invariant (cpu_owner_map[cpu_addr_map[cpu_pc]] == cpu_enclave_id);
-        invariant (cpu_enclave_id != tap_null_enc_id) ==> (tap_enclave_metadata_addr_excl[cpu_enclave_id][cpu_pc]);
+        invariant (valid_enclave_id(cpu_enclave_id) || cpu_enclave_id == tap_null_enc_id);
+        invariant (valid_enclave_id(cpu_enclave_id)) ==> (tap_enclave_metadata_addr_excl[cpu_enclave_id][cpu_pc]);
         // OS invariants.
-        invariant (cpu_enclave_id != tap_null_enc_id) ==> (tap_addr_perm_x(untrusted_addr_valid[untrusted_pc]));
-        invariant (cpu_enclave_id != tap_null_enc_id) ==> (cpu_owner_map[untrusted_addr_map[untrusted_pc]] == tap_null_enc_id);
+        invariant (valid_enclave_id(cpu_enclave_id)) ==> (tap_addr_perm_x(untrusted_addr_valid[untrusted_pc]));
+        invariant (valid_enclave_id(cpu_enclave_id)) ==> (cpu_owner_map[untrusted_addr_map[untrusted_pc]] == tap_null_enc_id);
         // CPU/enclave invariants.
-        invariant (cpu_enclave_id != tap_null_enc_id ==> tap_enclave_metadata_valid[cpu_enclave_id]);
+        invariant (valid_enclave_id(cpu_enclave_id)==> tap_enclave_metadata_valid[cpu_enclave_id]);
+        invariant (cpu_enclave_id != tap_blocked_enc_id);
         // enclave invariants.
-        invariant (!tap_enclave_metadata_valid[tap_null_enc_id]);
-        invariant (cpu_enclave_id != tap_null_enc_id) ==> 
+        invariant (forall e : tap_enclave_id_t ::
+                    !valid_enclave_id(e) ==> !tap_enclave_metadata_valid[e]);
+        invariant (valid_enclave_id(cpu_enclave_id)) ==> 
                     tap_addr_perm_x(tap_enclave_metadata_addr_valid[cpu_enclave_id][cpu_pc]);
-        invariant (cpu_enclave_id != tap_null_enc_id) ==> 
+        invariant (valid_enclave_id(cpu_enclave_id)) ==> 
                     cpu_owner_map[tap_enclave_metadata_addr_map[cpu_enclave_id][cpu_pc]] == cpu_enclave_id;
-        invariant (cpu_enclave_id != tap_null_enc_id) ==>
+        invariant (valid_enclave_id(cpu_enclave_id)) ==>
                     tap_addr_perm_x(
                         tap_enclave_metadata_addr_valid[cpu_enclave_id][tap_enclave_metadata_entrypoint[cpu_enclave_id]]);
-        invariant (cpu_enclave_id != tap_null_enc_id) ==>
+        invariant (valid_enclave_id(cpu_enclave_id)) ==>
                     cpu_owner_map[tap_enclave_metadata_addr_map[cpu_enclave_id][tap_enclave_metadata_entrypoint[cpu_enclave_id]]] == cpu_enclave_id;
         invariant (forall e : tap_enclave_id_t ::
                     tap_enclave_metadata_valid[e] ==> 
@@ -121,7 +125,7 @@ implementation InitialHavoc()
                     (cpu_enclave_id != tap_null_enc_id) ==> 
                         tap_addr_perm_eq(cpu_addr_valid[va], tap_enclave_metadata_addr_valid[cpu_enclave_id][va]));
         invariant  (forall pa : wap_addr_t, e : tap_enclave_id_t ::
-                    (e != tap_null_enc_id && !tap_enclave_metadata_valid[e]) ==> 
+                    (valid_enclave_id(e) && !tap_enclave_metadata_valid[e]) ==> 
                         (cpu_owner_map[pa] != e));
     {
         havoc r_eid;
@@ -143,7 +147,9 @@ implementation InitialHavoc()
             call status := destroy(r_eid);
         } else if (*) {
             havoc r_vaddr, r_word;
-            call r_excp, hit := store_va(r_vaddr, r_word);
+            havoc repl_way;
+            assume valid_cache_way_index(repl_way);
+            call r_excp, hit := store_va(r_vaddr, r_word, repl_way);
         } else if (*) {
             havoc cpu_pc;
             havoc cpu_regs;

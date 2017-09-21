@@ -33,20 +33,17 @@ implementation AbstractSanctum_translate(
                                 vaddr, cpu_evbase, cpu_evmask,
                                 cpu_eparmask, cpu_parmask);
 
-    call t_valid, paddr, acl := AbstractRISCV_translate(t_ptbr, vaddr);
-    assert t_valid == acl2valid(acl);
-
-    valid_bmap := read_bitmap(t_drbmap, dram_region_for(paddr)) == 1bv1;
-    assert valid_bmap == (read_bitmap( select_drbmap(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_edrbmap, cpu_drbmap), dram_region_for(paddr)) == 1bv1);
-    not_in_pa_range  := AND_pa(paddr,t_parmask) != t_parbase;
-    assert not_in_pa_range == (AND_pa(paddr, select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparmask, cpu_parmask)) != select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparbase, cpu_parbase));
-    supervisor := cpu_mode == RISCV_MODE_S;
-    valid := acl_valid(acl, access, supervisor, cpu_mode_pum, cpu_mode_mxr)
+    call t_valid, paddr, acl := AbstractRISCV_translate(t_ptbr, access, vaddr);
+    if (!t_valid) {
+      valid := false;
+      return;
+    } else {
+      valid_bmap := read_bitmap(t_drbmap, dram_region_for(paddr)) == 1bv1;
+      not_in_pa_range  := AND_pa(paddr,t_parmask) != t_parbase;
+      supervisor := cpu_mode == RISCV_MODE_S;
+      valid := acl_valid(acl, access, supervisor, cpu_mode_pum, cpu_mode_mxr)
                && valid_bmap && not_in_pa_range;
-    assert (valid <==>
-        (acl_valid(acl, access, supervisor, cpu_mode_pum, cpu_mode_mxr)) &&
-        (read_bitmap(select_drbmap(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_edrbmap, cpu_drbmap), dram_region_for(paddr)) == 1bv1) &&
-        (AND_pa(paddr, select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparmask, cpu_parmask)) != select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparbase, cpu_parbase)));
+    }
 }
 
 //

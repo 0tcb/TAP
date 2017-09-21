@@ -64,22 +64,39 @@ axiom kmax_word_t_as_int == 4294967295;
 // -------------------------------------------------------------------- //
 // uarch state                                                          //
 // -------------------------------------------------------------------- //
-type cache_set_index_t = bv9;
-type cache_tag_t       = bv9; 
-type cache_offset_t    = bv4; // 64B cache lines.
-// 8 (tag) + 8 (set index) + 6 (offset) = 22 (size of wap_addr_t)
-const k0_cache_set_index_t   : cache_set_index_t;
-const k1_cache_set_index_t   : cache_set_index_t;
-const kmax_cache_set_index_t : cache_set_index_t;
-axiom k0_cache_set_index_t   == 0bv9;
-axiom k1_cache_set_index_t   == 1bv9;
-axiom kmax_cache_set_index_t == 511bv9;
+type cache_set_index_t = int;
+type cache_way_index_t = int;
+type cache_tag_t       = int; 
 
-type cache_valid_map_t = [cache_set_index_t]bool;
-type cache_tag_map_t   = [cache_set_index_t]cache_tag_t;
-function {:bvbuiltin "bvadd"} PLUS_csi(p1: cache_set_index_t, p2: cache_set_index_t) : cache_set_index_t;
-function {:bvbuiltin "bvult"} LT_csi(p1: cache_set_index_t, p2: cache_set_index_t) : bool;
+const kmax_cache_set_index_t : cache_set_index_t;
+const kmax_cache_way_index_t : cache_way_index_t;
+axiom kmax_cache_set_index_t > 0;
+axiom kmax_cache_way_index_t > 0;
+
+function {:inline} valid_cache_set_index(i : cache_set_index_t) : bool { i >= 0 && i < kmax_cache_set_index_t }
+function {:inline} valid_cache_way_index(i : cache_way_index_t) : bool { i >= 0 && i < kmax_cache_way_index_t }
+
+type cache_valid_map_t = [cache_set_index_t, cache_way_index_t]bool;
+type cache_tag_map_t   = [cache_set_index_t, cache_way_index_t]cache_tag_t;
 
 function paddr2set(pa : wap_addr_t) : cache_set_index_t;
 function paddr2tag(pa : wap_addr_t) : cache_tag_t;
+
+//--------------------------------------------------------------------------//
+// Measurement                                                              //
+//--------------------------------------------------------------------------//
+type measurement_t = int;
+const k0_measurement_t : measurement_t;
+axiom k0_measurement_t == 0;
+
+//--------------------------------------------------------------------------//
+// utility fns                                                              //
+//--------------------------------------------------------------------------//
+function word2int(w : word_t) : int;
+axiom (forall w1, w2 : word_t :: (w1 != w2) ==> (word2int(w1) != word2int(w2)));
+axiom (forall w : word_t :: word2int(w) >= 0 && word2int(w) <= kmax_word_t_as_int);
+
+function vaddr2int(va : vaddr_t) : int;
+axiom (forall v1, v2 : vaddr_t :: (v1 != v2) ==> (vaddr2int(v1) != vaddr2int(v2)));
+axiom (forall w : vaddr_t :: vaddr2int(w) >= 0 && vaddr2int(w) <= kmax_vaddr_t_as_int);
 

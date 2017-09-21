@@ -136,22 +136,11 @@ implementation ConcreteSanctum_translate(
                                 vaddr, cpu_evbase, cpu_evmask,
                                 cpu_eparmask, cpu_parmask);
 
-    call t_valid, paddr, acl := ConcreteRISCV_translate(t_ptbr, vaddr);
-    assert t_valid <==> acl2valid(acl);
-    assert (t_valid ==> paddr2ppn(paddr) == translate_vaddr2ppn(mem, select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr));
-
+    call t_valid, paddr, acl := ConcreteRISCV_translate(t_ptbr, access, vaddr);
     valid_bmap := read_bitmap(t_drbmap, dram_region_for(paddr)) == 1bv1;
-    assert valid_bmap == (read_bitmap( select_drbmap(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_edrbmap, cpu_drbmap), dram_region_for(paddr)) == 1bv1);
     not_in_pa_range  := AND_pa(paddr,t_parmask) != t_parbase;
-    assert not_in_pa_range == (AND_pa(paddr, select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparmask, cpu_parmask)) != select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparbase, cpu_parbase));
     supervisor := cpu_mode == RISCV_MODE_S;
-    valid := acl_valid(acl, access, supervisor, cpu_mode_pum, cpu_mode_mxr)
-               && valid_bmap && not_in_pa_range;
-    assert (valid <==>
-        (acl_valid(acl, access, supervisor, cpu_mode_pum, cpu_mode_mxr)) &&
-        (read_bitmap(select_drbmap(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_edrbmap, cpu_drbmap), dram_region_for(paddr)) == 1bv1) &&
-        (AND_pa(paddr, select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparmask, cpu_parmask)) != select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparbase, cpu_parbase)));
-    assert (valid ==> acl2valid(acl));
+    valid := t_valid && acl_valid(acl, access, supervisor, cpu_mode_pum, cpu_mode_mxr) && valid_bmap && not_in_pa_range;
 }
 
 implementation ConcreteSanctum_create_page_table_mapping
@@ -234,7 +223,7 @@ implementation ConcreteSanctum_create_page_table_mapping
     assert (bv2bool(pte2valid(load_pte1(mem, ptbr, vaddr2vpn1(vaddr)))));
     assert (load_pte0(mem, pte2ppn(pte1), vaddr2vpn0(vaddr)) == pte0);
     // Read the second-level, return its valid.
-    assert (is_translation_valid(mem, ptbr, vaddr) == acl2valid(acl));
+    assert (is_mapping_valid(mem, ptbr, vaddr) == acl2valid(acl));
 
     assert (forall pa: wap_addr_t :: wpaddr2ppn(pa) == ptbr ==> mem[pa] == memp[pa]);
     assert (forall i : vpn1_t ::

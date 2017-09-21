@@ -52,26 +52,18 @@ procedure translate(
 )
     returns (valid: bool, paddr: paddr_t, acl: pte_acl_t);
     ensures (valid ==> does_translation_exist(ptbl_acl_map, select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr));
-    ensures (valid ==
+	ensures (valid && access == riscv_access_read) ==> 
+				acl2read(ptbl_acl_map[select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr2vpn(vaddr)]);
+	ensures (valid && access == riscv_access_write) ==> 
+				 acl2write(ptbl_acl_map[select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr2vpn(vaddr)]);
+	ensures (valid && access == riscv_access_fetch) ==> 
+				 acl2exec(ptbl_acl_map[select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr2vpn(vaddr)]);
+    ensures (valid <==>
         ((acl_valid(ptbl_acl_map[select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr2vpn(vaddr)], access, cpu_mode == RISCV_MODE_S, cpu_mode_pum, cpu_mode_mxr)) &&
+		 (valid_translation(ptbl_acl_map, select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), access, vaddr)) &&
          (read_bitmap(select_drbmap(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_edrbmap, cpu_drbmap), dram_region_for(ptbl_addr_map[select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr2vpn(vaddr)] ++ vaddr2offset(vaddr))) == 1bv1) &&
          (AND_pa(ptbl_addr_map[select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr2vpn(vaddr)] ++ vaddr2offset(vaddr), select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparmask, cpu_parmask)) != select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparbase, cpu_parbase))));
     ensures (valid ==> (paddr == ptbl_addr_map[select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr2vpn(vaddr)] ++ vaddr2offset(vaddr)));
     ensures (valid ==> (paddr == translate_vaddr2paddr(ptbl_addr_map, select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr)));
     ensures (valid ==> (acl == ptbl_acl_map[select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), vaddr2vpn(vaddr)]));
 
-procedure translate.DeterminismCheck()
-{
-    var vaddr : vaddr_t;
-    var cpu_mode : riscv_mode_t;
-    var cpu_mode_pum, cpu_mode_mxr : bool;
-    var valid, valid1 : bool;
-    var b, b1, c, c1, d, d1 : bool;
-    var mask, mask1, base, base1, paddr, paddr1 : paddr_t;
-    var acl, acl1 : pte_acl_t;
-
-    call valid, paddr, acl := translate(vaddr, riscv_access_read, cpu_mode, cpu_mode_pum, cpu_mode_mxr);
-    call valid1, paddr1, acl1 := translate(vaddr, riscv_access_read, cpu_mode, cpu_mode_pum, cpu_mode_mxr);
-
-    assert valid <==> valid1;
-}

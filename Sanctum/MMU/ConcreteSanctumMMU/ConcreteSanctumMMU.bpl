@@ -7,6 +7,7 @@ procedure ConcreteSanctum_translate(
 )
     returns (valid: bool, paddr: paddr_t, acl: pte_acl_t);
     ensures (valid <==>
+        (is_translation_valid(mem, select_ppn(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eptbr, cpu_ptbr), access, vaddr)) &&
         (acl_valid(acl, access, cpu_mode == RISCV_MODE_S, cpu_mode_pum, cpu_mode_mxr)) &&
         (read_bitmap(select_drbmap(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_edrbmap, cpu_drbmap), dram_region_for(paddr)) == 1bv1) &&
         (AND_pa(paddr, select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparmask, cpu_parmask)) != select_paddr(core_info_enclave_id, vaddr, cpu_evbase, cpu_evmask, cpu_eparbase, cpu_parbase)));
@@ -52,7 +53,7 @@ procedure ConcreteSanctum_create_page_table_mapping(
     // If we succeed, the  first-level PTE is always valid.
     ensures (success ==> pte2valid(load_pte1(mem, ptbr, vaddr2vpn1(vaddr))) == 1bv1);
     // If we succeed, the valid bit is set appropriately
-    ensures (success ==> is_translation_valid(mem, ptbr, vaddr) == acl2valid(acl));
+    ensures (success ==> is_mapping_valid(mem, ptbr, vaddr) == acl2valid(acl));
     // If we succeed, the PTE translates to the right PPN.
     ensures (success ==> translate_vaddr2ppn(mem, ptbr, vaddr) == paddr2ppn(paddr));
     // If we succeed, the PTE has the right ACL.
@@ -60,16 +61,16 @@ procedure ConcreteSanctum_create_page_table_mapping(
     // Regardless of whatever happens, other VPNs translate the same way as before.
     ensures (forall va: vaddr_t ::
                     (vaddr2vpn(va) != vaddr2vpn(vaddr)) ==>
-                        (is_translation_valid(mem, ptbr, va) <==>
-                            is_translation_valid(old(mem), ptbr, va)));
+                        (is_mapping_valid(mem, ptbr, va) <==>
+                            is_mapping_valid(old(mem), ptbr, va)));
     ensures (forall va: vaddr_t ::
                     (vaddr2vpn(va) != vaddr2vpn(vaddr) &&
-                        is_translation_valid(mem, ptbr, va)) ==>
+                        is_mapping_valid(mem, ptbr, va)) ==>
                          translate_vaddr2ppn(mem, ptbr, va) ==
                          translate_vaddr2ppn(old(mem), ptbr, va));
     ensures (forall va: vaddr_t ::
                     (vaddr2vpn(va) != vaddr2vpn(vaddr) &&
-                        is_translation_valid(mem, ptbr, va)) ==>
+                        is_mapping_valid(mem, ptbr, va)) ==>
                          translate_vaddr2acl(mem, ptbr, va) ==
                          translate_vaddr2acl(old(mem), ptbr, va));
     // We maintain the used_page_map invariants.
