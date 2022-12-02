@@ -1,4 +1,4 @@
-BOOGIEOPT:=/z3opt:smt.RELEVANCY=0 /z3opt:smt.CASE_SPLIT=0 /errorLimit:1
+BOOGIEOPT:=/proverOpt:O:smt.relevancy=0 /proverOpt:O:smt.case_split=0 /errorLimit:1
 BUILD=build
 
 SGX_PROOF_TARGET=$(BUILD)/SGXProof.xml
